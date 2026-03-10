@@ -62,65 +62,51 @@ export default function Interview() {
     }
   };
 
-  /* ---------------- Speech Recognition (Local AI) ---------------- */
-  const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
+  /* ---------------- Speech Recognition (Browser Native) ---------------- */
+  
+  useEffect(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = "en-US";
 
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      audioChunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
+      recognition.onresult = (event) => {
+        let fullTranscript = "";
+        for (let i = 0; i < event.results.length; i++) {
+          fullTranscript += event.results[i][0].transcript + " ";
         }
+        setAnswer(fullTranscript.trim());
       };
 
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
-        await sendAudioToBackend(audioBlob);
+
+      recognition.onerror = (event) => {
+        console.error("Speech Recognition Error:", event.error);
+        setIsRecording(false);
       };
 
-      mediaRecorder.start();
+      recognition.onend = () => {
+        setIsRecording(false);
+      };
+
+      recognitionRef.current = recognition;
+    }
+  }, []);
+
+  const startRecording = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.start();
       setIsRecording(true);
-    } catch (err) {
-      console.error("Error starting recording:", err);
+    } else {
+      alert("Speech Recognition is not supported in this browser.");
     }
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current) {
-      mediaRecorderRef.current.stop();
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
       setIsRecording(false);
-    }
-  };
-
-  const sendAudioToBackend = async (blob) => {
-    try {
-      setLoading(true);
-      const formData = new FormData();
-      formData.append("audio", blob, "answer.wav");
-      
-      const token = localStorage.getItem("token");
-      const res = await axios.post(
-        "http://localhost:3000/api/ai/stt",
-        formData,
-        { headers: { 
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "multipart/form-data" 
-        } }
-      );
-
-      if (res.data.text) {
-        setAnswer(prev => prev + " " + res.data.text);
-      }
-    } catch (err) {
-      console.error("Local STT Error:", err);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -154,22 +140,12 @@ export default function Interview() {
 
 };
 const handleTimeUp = async () => {
-
+  stopRecording(); 
   await submitAnswer(true);
-
-  const answered = (session.answers?.length || 0) + 1;
-
-  if (answered < session.questions.length) {
-
-    handleNextQuestion();
-
-  } else {
-
-    completeSession();
-
-  }
-
+  // We don't call handleNextQuestion automatically anymore.
+  // This allows the user to see the feedback/suggestion before moving on.
 };
+
 
   /* ---------------- Fetch Session ---------------- */
 
@@ -254,6 +230,20 @@ const handleTimeUp = async () => {
       );
 
       setFeedback(res.data.evaluation);
+      
+      // Update local session state (answers and possibly next dynamic question)
+      setSession(prev => {
+        const updatedQuestions = res.data.nextQuestion 
+          ? [...prev.questions, res.data.nextQuestion] 
+          : prev.questions;
+          
+        return {
+          ...prev,
+          questions: updatedQuestions,
+          answers: [...(prev.answers || []), { questionId: currentQuestion.id }]
+        };
+      });
+
 
     } catch (err) {
 
@@ -273,7 +263,9 @@ const handleTimeUp = async () => {
   const completeSession = async () => {
 
     try {
-
+      setLoading(true);
+      clearInterval(timerRef.current);
+      stopRecording();
       const token = localStorage.getItem("token");
 
       const res = await axios.post(
@@ -293,6 +285,8 @@ const handleTimeUp = async () => {
       console.error(err);
       setError("Failed to complete session");
 
+    } finally {
+      setLoading(false);
     }
 
   };
@@ -300,7 +294,7 @@ const handleTimeUp = async () => {
   const handleNextQuestion = () => {
 
     clearInterval(timerRef.current);
-    fetchSession();
+    fetchSession(); // Re-fetch to sync state or just manually set next question
 
   };
 
@@ -356,7 +350,7 @@ const handleTimeUp = async () => {
         </h2>
 
         <div>
-          Question {(session.answers?.length || 0) + 1} / {session.questions.length}
+           {session.status === 'in-progress' && `Dynamic Session`}
         </div>
       </div>
 
@@ -382,9 +376,15 @@ const handleTimeUp = async () => {
 
           <p>{feedback.feedback}</p>
 
-          <button onClick={handleNextQuestion}>
-            Next Question <ArrowRight size={18} />
-          </button>
+          <div style={{ display: "flex", gap: "10px" }}>
+            <button className="btn-primary" onClick={handleNextQuestion}>
+              Next Question <ArrowRight size={18} />
+            </button>
+            
+            <button className="btn-outline" onClick={completeSession}>
+               Finish Interview Early
+            </button>
+          </div>
 
         </div>
 
@@ -405,22 +405,31 @@ const handleTimeUp = async () => {
             }}
           />
 
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-
-            <button onClick={toggleRecording}>
-              {isRecording ? <MicOff /> : <Mic />} {isRecording ? "Stop Mic" : "Start Mic"}
+          <div style={{ display: "flex", justifyContent: "space-between", gap: "10px" }}>
+            <div style={{ display: "flex", gap: "10px" }}>
+              <button onClick={toggleRecording} className="btn-outline">
+                {isRecording ? <MicOff /> : <Mic />} {isRecording ? "Stop Mic" : "Start Mic"}
+              </button>
+              <button
+                className="btn-outline"
+                style={{ borderColor: "#ff4d4d", color: "#ff4d4d" }}
+                onClick={() => {
+                   if(window.confirm("Are you sure you want to finish the interview early?")) {
+                      completeSession();
+                   }
+                }}
+              >
+                Finish Early
+              </button>
+            </div>
+            
+            <button
+              className="btn-primary"
+              onClick={() => submitAnswer(false)}
+              disabled={loading || !answer.trim()}
+            >
+              {loading ? "Evaluating..." : "Submit Answer"}
             </button>
-<button
-  className="btn-primary"
-  onClick={() => submitAnswer(false)}
-  disabled={loading || !answer.trim()}
->
-  {loading
-    ? "Evaluating..."
-    : session.answers.length + 1 === session.questions.length
-    ? "Submit Interview"
-    : "Submit & Next"}
-</button>
           </div>
 
         </div>
@@ -430,5 +439,6 @@ const handleTimeUp = async () => {
     </div>
 
   );
+
 
 }

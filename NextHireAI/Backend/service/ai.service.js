@@ -3,7 +3,8 @@ const OpenAI = require("openai");
 
 const openai = new OpenAI({
   apiKey: "ollama",
-  baseURL: "http://localhost:11434/v1",
+  baseURL: process.env.OLLAMA_BASE_URL || "http://localhost:11434/v1",
+  timeout: 120000,
 });
 
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3";
@@ -12,60 +13,129 @@ const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3";
 
 const extractTextFromBuffer = async (buffer) => {
   try {
+    // Check if it's a PDF by looking at the magic numbers %PDF
+    if (buffer.toString("utf8", 0, 4) !== "%PDF") {
+      console.log("[AI Service] File is not a PDF, skipping text extraction.");
+      return "IMAGE_FILE_CONTENT (OCR pending)";
+    }
+
     const data = await pdfParse(buffer);
-
     const text = (data.text || "").replace(/\s+/g, " ").trim();
-
     return text;
   } catch (err) {
-    const raw = buffer.toString("latin1");
+    console.error("[AI Service] Extraction Error:", err.message);
+    return "Error extracting text";
+  }
+};
 
-    const matches = raw.match(/([^\x00-\x1F\x7F-\xFF]{4,})/g) || [];
+/* ---------------- UTILS ---------------- */
 
-    const text = matches
-      .filter((s) => /[a-zA-Z]/.test(s))
-      .join(" ")
-      .replace(/\s+/g, " ")
-      .trim();
+const extractJson = (text) => {
+  if (!text) {
+    console.warn("[AI Service] extractJson: Received empty text");
+    return null;
+  }
 
-    return text;
+  console.log("[AI Service] Extracting JSON from AI response...");
+
+  try {
+    const startObj = text.indexOf("{");
+    const endObj = text.lastIndexOf("}");
+    const startArr = text.indexOf("[");
+    const endArr = text.lastIndexOf("]");
+
+    let start = -1;
+    let end = -1;
+
+    // Determine the root structure
+    if (startObj !== -1 && (startArr === -1 || startObj < startArr)) {
+      start = startObj;
+      end = endObj;
+    } else if (startArr !== -1) {
+      start = startArr;
+      end = endArr;
+    }
+
+    if (start === -1 || end === -1 || end <= start) {
+      // Try parsing the whole text after stripping markdown blocks
+      const cleaned = text
+        .replace(/```json/g, "")
+        .replace(/```/g, "")
+        .trim();
+
+      try {
+        return JSON.parse(cleaned);
+      } catch (e) {
+        console.error(
+          "[AI Service] JSON parse failed after cleaning. Raw content below.",
+        );
+        console.error(text);
+        return null;
+      }
+    }
+
+    const potentialJson = text.substring(start, end + 1);
+    const parsed = JSON.parse(potentialJson);
+    console.log("[AI Service] JSON parsed successfully.");
+    return parsed;
+  } catch (err) {
+    console.error("[AI Service] extractJson Error:", err.message);
+    console.error(
+      "[AI Service] Failing text snippet:",
+      text.substring(0, 200) + "...",
+    );
+    return null;
   }
 };
 
 /* ---------------- RESUME ANALYSIS ---------------- */
 
 const analyseResume = async (resumeText, fileData = null) => {
+  console.log(
+    `[AI Service] Starting Resume Analysis (Text Length: ${resumeText?.length || 0})`,
+  );
+
   const prompt = `
-Analyze the following resume text and extract structured information.
+Task: Analyse the resume text provided below and extract essential professional details.
+Constraint: Respond ONLY with a valid JSON object. Do not include markdown or conversational text.
 
-Return JSON only:
-
+Required JSON Structure:
 {
-"name":"",
-"skills":[],
-"projects":[{"name":"","description":""}],
-"experience":[{"company":"","role":""}],
-"education":[{"institution":"","degree":""}]
+"name": "Full Name",
+"skills": ["Skill1", "Skill2"],
+"projects": [{"name": "P1", "description": "D1"}],
+"experience": [{"company": "C1", "role": "R1"}],
+"education": [{"institution": "I1", "degree": "Deg1"}]
 }
 
-Resume:
+Resume Content:
 ${resumeText}
 `;
 
-  const response = await openai.chat.completions.create({
-    model: OLLAMA_MODEL,
+  try {
+    const response = await openai.chat.completions.create({
+      model: OLLAMA_MODEL,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a professional HR data extraction bot. You output only valid JSON.",
+        },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0,
+      max_tokens: 1500,
+    });
 
-    messages: [
-      { role: "system", content: "You are an expert HR recruiter." },
-      { role: "user", content: prompt },
-    ],
-  });
-
-  const text = response.choices[0].message.content;
-
-  const cleaned = text.replace(/```json/g, "").replace(/```/g, "");
-
-  return JSON.parse(cleaned);
+    const result = extractJson(response.choices[0].message.content);
+    console.log(
+      `[AI Service] Analysis complete for: ${result.name || "Unknown"}`,
+    );
+    return result;
+  } catch (err) {
+    console.error("[AI Service] Resume Analysis Error:", err.message);
+    throw err;
+  }
 };
 
 /* ---------------- DYNAMIC QUESTION GENERATION ---------------- */
@@ -74,145 +144,212 @@ const generateInterviewQuestions = async (
   resume,
   jobRole,
   difficulty = "medium",
-  count = 5,
+  count = 2,
 ) => {
-  const questionCount = Math.max(count, 5); // ensure minimum 5
+  const questionCount = count;
+  console.log(
+    `[AI Service] Generating ${questionCount} initial questions for Job: ${jobRole}`,
+  );
 
   const prompt = `
-You are a senior technical interviewer.
-
-Generate ${questionCount} interview questions based on the candidate resume.
-
+Task: Generate ${questionCount} initial warming-up interview questions for a candidate.
 Job Role: ${jobRole}
 Difficulty: ${difficulty}
 
-Candidate Skills:
-${(resume.skills || []).join(", ")}
+Skills from Resume: ${(resume.skills || []).join(", ")}
+Projects from Resume: ${(resume.projects || []).map((p) => p.name).join(", ")}
 
-Projects:
-${(resume.projects || []).map((p) => p.name).join(", ")}
-
-Rules:
-- Ask at least 5 questions
-- Mix Technical, Behavioural and HR questions
-- Return ONLY valid JSON
-
-Format:
-
+Required JSON Format (Array of objects):
 [
-{
-"id":1,
-"question":"question text",
-"category":"Technical | Behavioural | HR",
-"difficulty":"easy | medium | hard",
-"expectedKeyPoints":["point1","point2"]
-}
+  {
+    "id": 1,
+    "question": "The question text",
+    "category": "Technical | Behavioural | HR",
+    "difficulty": "easy | medium | hard",
+    "expectedKeyPoints": ["point1", "point2"]
+  }
 ]
+
+Constraints:
+1. Return ONLY the JSON array.
+2. Mix technical and behavioral questions properly.
 `;
 
-  const response = await openai.chat.completions.create({
-    model: OLLAMA_MODEL,
-    messages: [
-      { role: "system", content: "You are an expert technical interviewer." },
-      { role: "user", content: prompt },
-    ],
-  });
+  try {
+    const response = await openai.chat.completions.create({
+      model: OLLAMA_MODEL,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a senior technical interviewer. You respond only with a JSON array.",
+        },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.7,
+    });
 
-  const text = response.choices[0].message.content;
-
-  const cleaned = text.replace(/```json/g, "").replace(/```/g, "");
-
-  let questions = JSON.parse(cleaned);
-
-  /* ----- Ensure minimum 5 questions ----- */
-
-  if (!questions || questions.length < 5) {
-    const fallback = [
-      {
-        id: 1,
-        question: "Tell me about yourself.",
-        category: "HR",
-        difficulty: "easy",
-        expectedKeyPoints: ["background", "experience"],
-      },
-      {
-        id: 2,
-        question: "Explain a project from your resume.",
-        category: "Technical",
-        difficulty: "medium",
-        expectedKeyPoints: ["problem", "solution"],
-      },
-      {
-        id: 3,
-        question: "What are your key strengths?",
-        category: "Behavioural",
-        difficulty: "easy",
-        expectedKeyPoints: ["skills", "examples"],
-      },
-      {
-        id: 4,
-        question: "What challenges did you face in your last project?",
-        category: "Technical",
-        difficulty: "medium",
-        expectedKeyPoints: ["problem solving"],
-      },
-      {
-        id: 5,
-        question: "Where do you see yourself in 5 years?",
-        category: "HR",
-        difficulty: "easy",
-        expectedKeyPoints: ["career goals"],
-      },
-    ];
-
-    questions = fallback;
+    const questions = extractJson(response.choices[0].message.content);
+    console.log(`[AI Service] Generated ${questions?.length || 0} questions.`);
+    return questions;
+  } catch (err) {
+    console.error("[AI Service] Question Generation Error:", err.message);
+    return [];
   }
+};
 
-  return questions.slice(0, questionCount);
+/* ---------------- ADAPTIVE NEXT QUESTION GENERATION ---------------- */
+
+const generateNextAdaptiveQuestion = async (
+  resume,
+  jobRole,
+  difficulty,
+  history, // Array of { question, answer }
+  nextId,
+) => {
+  console.log(
+    `[AI Service] Generating next dynamic question (ID: ${nextId})...`,
+  );
+
+  // Safety check for resume
+  const skillsText = resume?.skills?.join(", ") || "General skills";
+  const projectsText =
+    resume?.projects?.map((p) => p.name).join(", ") || "General projects";
+
+  const historyText = (history || [])
+    .map((h, i) => `Q${i + 1}: ${h.question}\nA${i + 1}: ${h.userAnswer}`)
+    .join("\n\n");
+
+  const prompt = `
+Task: Generate the NEXT interview question based on the conversation history. 
+Candidate Background: ${skillsText}
+Job Role: ${jobRole}
+Difficulty: ${difficulty}
+
+Conversation History so far:
+${historyText || "No history yet."}
+
+Return ONLY a JSON object:
+{
+  "id": ${nextId},
+  "question": "The specific interview question",
+  "category": "Technical | Behavioural | Situational",
+  "difficulty": "${difficulty}",
+  "expectedKeyPoints": ["key point 1", "key point 2"]
+}
+`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: OLLAMA_MODEL,
+      messages: [
+        {
+          role: "system",
+          content: "You are an adaptive senior interviewer. Output ONLY JSON.",
+        },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.8,
+    });
+
+    const result = extractJson(response.choices[0].message.content);
+    if (!result) {
+      throw new Error("JSON extraction returned null");
+    }
+    return result;
+  } catch (err) {
+    console.error("[AI Service] Dynamic Question Error:", err.message);
+    return {
+      id: nextId,
+      question:
+        "Could you tell me more about your recent project challenges and how you handled them?",
+      category: "Technical",
+      difficulty: difficulty,
+      expectedKeyPoints: ["challenge", "solution", "learning"],
+    };
+  }
 };
 
 /* ---------------- ANSWER EVALUATION ---------------- */
 
 const evaluateAnswer = async (question, answer, expectedKeyPoints = []) => {
+  console.log("[AI Service] Evaluating candidate answer...");
+
+  const points = (expectedKeyPoints || []).join(", ");
+
   const prompt = `
-Evaluate the candidate answer.
+Task: Evaluate the candidate's response to an interview question.
+Important: The answer may be transcribed from speech, so please ignore minor grammatical glitches or filler words (like "um", "ah", "you know"). Focus on the core technical/professional value and communication clarity.
 
-Question:
-${question}
+Question: ${question}
+Key Technical Points Expected: ${points}
+Candidate Answer: ${answer}
 
-Expected Key Points:
-${expectedKeyPoints.join(", ")}
+Judge the marks (score) out of 100 based on:
+1. Accuracy: Does it cover the expected points?
+2. Professionalism: Is the tone appropriate?
+3. Clarity: Is the explanation logical?
 
-Candidate Answer:
-${answer}
-
-Return JSON only:
-
+Response Format (Respond ONLY with this JSON):
 {
-"score":7,
-"feedback":"",
-"strengths":[],
-"improvements":[],
-"modelAnswer":""
+  "score": 0-100,
+  "feedback": "constructive professional feedback",
+  "strengths": ["list specific strengths"],
+  "improvements": ["list actionable improvements"],
+  "modelAnswer": "a comprehensive high-quality response example"
 }
-
-Score must be between 0 and 10.
 `;
 
-  const response = await openai.chat.completions.create({
-    model: OLLAMA_MODEL,
+  try {
+    const response = await openai.chat.completions.create({
+      model: OLLAMA_MODEL,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are an expert technical interviewer. You output only valid JSON.",
+        },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.2,
+    });
 
-    messages: [
-      { role: "system", content: "You are a senior interviewer." },
-      { role: "user", content: prompt },
-    ],
-  });
+    let evaluation = extractJson(response.choices[0].message.content);
 
-  const text = response.choices[0].message.content;
+    // Safety check if extractJson returned null
+    if (!evaluation) {
+      throw new Error("Could not extract JSON from AI response.");
+    }
 
-  const cleaned = text.replace(/```json/g, "").replace(/```/g, "");
+    // Ensure score is a number between 0-100
+    if (typeof evaluation.score !== "number") {
+      evaluation.score = parseInt(evaluation.score) || 50;
+    }
 
-  return JSON.parse(cleaned);
+    // Ensure all required fields exist to prevent controller crashes
+    return {
+      score: evaluation.score || 50,
+      feedback: evaluation.feedback || "Answer captured.",
+      strengths: Array.isArray(evaluation.strengths)
+        ? evaluation.strengths
+        : ["Answer provided"],
+      improvements: Array.isArray(evaluation.improvements)
+        ? evaluation.improvements
+        : ["No specific improvements suggested"],
+      modelAnswer: evaluation.modelAnswer || "Model answer not generated.",
+    };
+  } catch (err) {
+    console.error("[AI Service] Answer Evaluation Error:", err.message);
+    // Fallback evaluation if AI fails explicitly
+    return {
+      score: 50,
+      feedback:
+        "The AI encountered an issue evaluation this specific answer. The answer has been saved.",
+      strengths: ["Answer submitted successfully"],
+      improvements: ["Feedback generation encountered a temporary issue"],
+      modelAnswer: "Contact administration if this persists.",
+    };
+  }
 };
 
 /* ---------------- FINAL INTERVIEW REPORT ---------------- */
@@ -223,46 +360,36 @@ const generateInterviewReport = async (
   evaluations,
   jobRole,
 ) => {
+  console.log("[AI Service] Generating final interview report...");
   const prompt = `
-Analyze the interview performance.
-
 Job Role: ${jobRole}
+Questions/Answers: ${questions.map((q, i) => `Q: ${q.question} | A: ${answers[i]?.userAnswer || "No answer"}`).join("\n")}
 
-Questions:
-${questions.map((q, i) => `${i + 1}. ${q.question}`).join("\n")}
-
-Answers:
-${answers.map((a, i) => `${i + 1}. ${a.userAnswer}`).join("\n")}
-
-Return JSON only:
-
+Respond ONLY with this JSON:
 {
-"englishEfficiency":"",
-"confidence":"",
-"expectedAnswer":"",
-"actualAnswer":"",
-"overallPerformance":"",
-"improvements":[],
-"score":8
+  "englishEfficiency": "string",
+  "confidence": "string", 
+  "overallPerformance": "string",
+  "improvements": ["string"],
+  "overallScore": 0-100
 }
-
-Score should be between 0 and 10.
 `;
 
-  const response = await openai.chat.completions.create({
-    model: OLLAMA_MODEL,
+  try {
+    const response = await openai.chat.completions.create({
+      model: OLLAMA_MODEL,
+      messages: [
+        { role: "system", content: "You are a HR manager. Output JSON only." },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.2,
+    });
 
-    messages: [
-      { role: "system", content: "You are an expert interviewer." },
-      { role: "user", content: prompt },
-    ],
-  });
-
-  const text = response.choices[0].message.content;
-
-  const cleaned = text.replace(/```json/g, "").replace(/```/g, "");
-
-  return JSON.parse(cleaned);
+    return extractJson(response.choices[0].message.content);
+  } catch (err) {
+    console.error("[AI Service] Report Generation Error:", err.message);
+    throw err;
+  }
 };
 
 /* ---------------- ONE SHOT ---------------- */
@@ -273,13 +400,15 @@ const analyseAndGenerateQuestions = async (
   jobRole,
   difficulty,
 ) => {
+  console.log(
+    `[AI Service] Starting One-Shot Analysis & Question Generation...`,
+  );
   const analysis = await analyseResume(resumeText);
-
   const questions = await generateInterviewQuestions(
     analysis,
     jobRole,
     difficulty,
-    5,
+    2, // Reduced to 2 for faster initial start
   );
 
   return {
@@ -289,28 +418,14 @@ const analyseAndGenerateQuestions = async (
 };
 
 /* ---------------- SPEECH TO TEXT (STT) ---------------- */
-const whisper = require("whisper-node");
+// Note: Removed whisper-node because it requires 'make' and C++ compilation which is complex on Windows.
+// Recommendation: Use Web Speech API (window.webkitSpeechRecognition) on the frontend for real-time transcription.
 
 const transcribeAudio = async (filePath) => {
-  try {
-    const transcript = await whisper(filePath, {
-      modelName: "tiny.en", // use tiny for speed
-      whisperOptions: {
-        gen_file_txt: false,
-        gen_file_vtt: false,
-        gen_file_srt: false,
-      },
-    });
-
-    // whisper-node returns an array of segments
-    return transcript
-      .map((s) => s.speech)
-      .join(" ")
-      .trim();
-  } catch (err) {
-    console.error("STT Error:", err);
-    throw new Error("Failed to transcribe audio locally.");
-  }
+  console.warn(
+    "Backend STT (Whisper) is disabled on Windows due to compilation issues.",
+  );
+  return "STT handled by frontend";
 };
 
 /* ---------------- TEXT TO SPEECH (TTS) ---------------- */
@@ -331,6 +446,7 @@ module.exports = {
   extractTextFromBuffer,
   analyseResume,
   generateInterviewQuestions,
+  generateNextAdaptiveQuestion,
   evaluateAnswer,
   generateInterviewReport,
   analyseAndGenerateQuestions,

@@ -134,7 +134,7 @@ const uploadAndStartSession = async (req, res) => {
     const { jobRole = "Software Engineer", difficulty = "medium" } = req.body;
 
     console.log(
-      `[Upload Controller] Start (Job: ${jobRole}, Diff: ${difficulty}, File: ${req.file?.originalname})`
+      `[Upload Controller] Start (Job: ${jobRole}, Diff: ${difficulty}, File: ${req.file?.originalname})`,
     );
 
     if (!req.file) {
@@ -147,70 +147,94 @@ const uploadAndStartSession = async (req, res) => {
 
     const rawText = await extractTextFromBuffer(req.file.buffer);
 
-    console.log(
-      `[Upload Controller] Text extracted (${rawText.length} chars)`
-    );
+    console.log(`[Upload Controller] Text extracted (${rawText.length} chars)`);
 
     /* ---------------- Upload + AI in Parallel ---------------- */
 
     console.log(`[Upload Controller] Launching Parallel Storage & AI...`);
+
+    const aiPromise = analyseAndGenerateQuestions(
+      rawText,
+      { buffer: req.file.buffer, mimeType: req.file.mimetype },
+      jobRole,
+      difficulty,
+    ).catch((err) => {
+      console.error("[Upload Controller] AI Promise Rejected:", err.message);
+      return { analysis: {}, questions: [] }; // Return empty to trigger fallbacks
+    });
 
     const [uploaded, oneShotResult] = await Promise.all([
       uploadFile(
         req.file.buffer,
         req.file.originalname,
         req.file.mimetype,
-        "/NextHireAI/resumes"
-      ),
-
-      analyseAndGenerateQuestions(
-        rawText,
-        { buffer: req.file.buffer, mimeType: req.file.mimetype },
-        jobRole,
-        difficulty
-      )
+        "/NextHireAI/resumes",
+      ).catch((err) => {
+        console.error(
+          "[Upload Controller] Storage Promise Rejected:",
+          err.message,
+        );
+        return { url: "pending" };
+      }),
+      aiPromise,
     ]);
 
-    console.log("AI RESULT:", oneShotResult);
+    console.log(
+      `[Upload Controller] Parallel tasks finished. Result Keys: ${Object.keys(oneShotResult || {})}`,
+    );
 
     /* ---------------- Validate AI Output ---------------- */
 
     let questions = oneShotResult?.questions;
 
     if (!questions || questions.length === 0) {
-
-      console.warn("AI returned empty questions. Using fallback questions.");
+      console.warn(
+        "[Upload Controller] No questions from AI. Loading 5 standard fallback questions.",
+      );
 
       questions = [
         {
           id: 1,
-          question: "Tell me about yourself.",
-          category: "HR",
+          question: "Tell me about your technical background and experience.",
+          category: "Technical",
           difficulty: "easy",
-          expectedKeyPoints: ["background", "experience"],
-          timeLimit: 120
+          expectedKeyPoints: ["experience", "projects", "education"],
         },
         {
           id: 2,
-          question: "Explain a project you worked on recently.",
+          question: "Describe a project where you solved a difficult problem.",
           category: "Technical",
           difficulty: "medium",
-          expectedKeyPoints: ["problem", "solution", "impact"],
-          timeLimit: 120
+          expectedKeyPoints: ["problem", "solution", "result"],
         },
         {
           id: 3,
-          question: "What are your strengths as a developer?",
-          category: "Behavioural",
+          question:
+            "What are your key strengths that make you a good fit for this role?",
+          category: "HR",
           difficulty: "easy",
-          expectedKeyPoints: ["skills", "examples"],
-          timeLimit: 120
-        }
+          expectedKeyPoints: ["skills", "culture fit"],
+        },
+        {
+          id: 4,
+          question:
+            "How do you handle working in a high-pressure team environment?",
+          category: "Behavioural",
+          difficulty: "medium",
+          expectedKeyPoints: ["teamwork", "stress management"],
+        },
+        {
+          id: 5,
+          question: "What are your long-term career aspirations?",
+          category: "HR",
+          difficulty: "easy",
+          expectedKeyPoints: ["growth", "goals"],
+        },
       ];
-
     }
 
     /* ---------------- Save Resume ---------------- */
+    console.log(`[Upload Controller] Saving resume metadata to DB...`);
 
     const resume = await resumeModel.findOneAndUpdate(
       { userId: req.user.id },
@@ -220,43 +244,42 @@ const uploadAndStartSession = async (req, res) => {
         fileName: req.file.originalname,
         rawText,
         analysedAt: new Date(),
-        ...oneShotResult.analysis
+        ...(oneShotResult.analysis || {}),
       },
-      { upsert: true, new: true }
+      { upsert: true, new: true },
     );
 
     /* ---------------- Create Interview Session ---------------- */
 
-    console.log(`[Upload Controller] Creating interview session...`);
+    console.log(`[Upload Controller] Initializing interview session...`);
 
     const session = await interviewSessionModel.create({
       userId: req.user.id,
       resumeId: resume._id,
       jobRole,
       difficulty,
-      questions
+      questions,
     });
 
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
 
-    console.log(`[Upload Controller] Success! Total time: ${totalTime}s`);
+    console.log(
+      `[Upload Controller] SUCCESS! Session ID: ${session._id} (Time: ${totalTime}s)`,
+    );
 
     return res.status(200).json({
-      message: "Resume processed successfully.",
+      message: "Processing complete.",
       resume,
       sessionId: session._id,
-      questionsCount: questions.length
+      questionsCount: questions.length,
     });
-
   } catch (error) {
-
     console.error("[Upload Controller] FATAL ERROR:", error);
 
     return res.status(500).json({
       message: "Server error during analysis.",
-      error: error.message
+      error: error.message,
     });
-
   }
 };
 

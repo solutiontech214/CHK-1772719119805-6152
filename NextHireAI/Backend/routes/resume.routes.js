@@ -15,10 +15,19 @@ const resumeRouter = express.Router();
 const storage = multer.memoryStorage();
 
 const fileFilter = (req, file, cb) => {
-  if (file.mimetype === "application/pdf") {
+  const allowedMimes = [
+    "application/pdf",
+    "image/jpeg",
+    "image/png",
+    "image/jpg",
+  ];
+  if (allowedMimes.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error("Only PDF files are allowed for resume upload."), false);
+    cb(
+      new Error("Only PDF and standard image files (PNG, JPG) are allowed."),
+      false,
+    );
   }
 };
 

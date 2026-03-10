@@ -6,6 +6,7 @@ const {
   generateInterviewQuestions,
   evaluateAnswer,
   generateInterviewReport,
+  generateNextAdaptiveQuestion,
 } = require("../service/ai.service");
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -147,12 +148,33 @@ const submitAnswer = async (req, res) => {
       modelAnswer: evaluation.modelAnswer,
     });
 
+    // --- DYNAMIC NEXT QUESTION GENERATION ---
+    // Only generate if we haven't reached a certain limit (e.g., 10 questions)
+    const MAX_QUESTIONS = 10;
+    let nextQuestion = null;
+
+    if (session.questions.length < MAX_QUESTIONS) {
+      const resume = await resumeModel.findById(session.resumeId);
+      nextQuestion = await generateNextAdaptiveQuestion(
+        resume,
+        session.jobRole,
+        session.difficulty,
+        session.answers, // History of Q&A
+        session.questions.length + 1, // Next ID
+      );
+
+      if (nextQuestion) {
+        session.questions.push(nextQuestion);
+      }
+    }
+
     await session.save();
 
     return res.status(200).json({
       message: "Answer submitted and evaluated",
       questionId: parseInt(questionId),
       evaluation,
+      nextQuestion, // Frontend can use this or re-fetch session
     });
   } catch (error) {
     console.error("submitAnswer error:", error);
@@ -168,23 +190,40 @@ const submitAnswer = async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 const completeSession = async (req, res) => {
   try {
-
-    const session = await interviewSessionModel.findById(req.params.id);
+    const { sessionId } = req.params;
+    const session = await interviewSessionModel.findOne({
+      _id: sessionId,
+      userId: req.user.id,
+    });
 
     if (!session) {
       return res.status(404).json({ message: "Session not found" });
     }
 
-    if (!session.answers || session.answers.length === 0) {
-      return res.status(400).json({ message: "No answers submitted yet" });
-    }
+    // Default report if no answers given
+    let report = {
+      overallScore: 0,
+      summary: "No answers were submitted during this session.",
+      strengths: [],
+      improvements: [
+        "Please try to answer questions to get a proper evaluation.",
+      ],
+      categoryScores: [],
+    };
 
-    const report = await generateInterviewReport(
-      session.questions,
-      session.answers,
-      session.answers.map(a => a.evaluation),
-      session.jobRole
-    );
+    if (session.answers && session.answers.length > 0) {
+      report = await generateInterviewReport(
+        session.questions,
+        session.answers,
+        session.answers.map((a) => ({
+          score: a.score,
+          feedback: a.feedback,
+          strengths: a.strengths,
+          improvements: a.improvements,
+        })),
+        session.jobRole,
+      );
+    }
 
     session.status = "completed";
     session.report = report;
@@ -193,18 +232,15 @@ const completeSession = async (req, res) => {
 
     return res.status(200).json({
       message: "Interview completed",
-      report
+      report,
     });
-
   } catch (error) {
-
     console.error("completeSession error:", error);
 
     return res.status(500).json({
       message: "Server error",
-      error: error.message
+      error: error.message,
     });
-
   }
 };
 

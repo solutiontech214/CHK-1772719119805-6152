@@ -6,21 +6,26 @@ const client = new ImageKit({
   urlEndpoint: process.env.IMAGEKIT_URL_ENDPOINT,
 });
 
-
 const uploadFile = async (
   buffer,
   fileName,
   mimetype,
   folder = "/NextHireAI/uploads",
 ) => {
-  const response = await client.files.upload({
-    file: buffer.toString("base64"),
-    fileName: fileName,
-    folder: folder,
-    useUniqueFileName: true,
-  });
-
-  return response;
+  console.log(`[Storage] Uploading ${fileName} (${buffer.length} bytes)...`);
+  try {
+    const response = await client.files.upload({
+      file: buffer.toString("base64"),
+      fileName: fileName,
+      folder: folder,
+      useUniqueFileName: true,
+    });
+    console.log(`[Storage] Upload success: ${response.url}`);
+    return response;
+  } catch (err) {
+    console.error(`[Storage] Upload failed: ${err.message}`);
+    throw err;
+  }
 };
 
 module.exports = uploadFile;

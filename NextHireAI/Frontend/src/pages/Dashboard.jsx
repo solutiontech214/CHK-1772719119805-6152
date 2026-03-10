@@ -82,7 +82,7 @@ export default function Dashboard() {
           'Content-Type': 'multipart/form-data',
           Authorization: `Bearer ${token}`
         },
-        timeout: 60000 // 60s timeout to prevent infinite hangs
+        timeout: 120000 // Increased to 120s for local AI processing
       });
       
       clearInterval(interval);
