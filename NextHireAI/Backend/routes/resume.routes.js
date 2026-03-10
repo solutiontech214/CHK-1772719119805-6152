@@ -7,6 +7,8 @@ const {
   deleteMyResume,
   reanalyseResume,
   uploadAndStartSession,
+  startInterviewWithExistingResume,
+  viewResume,
 } = require("../controller/resume.controller");
 
 const resumeRouter = express.Router();
@@ -69,8 +71,18 @@ resumeRouter.post(
 // GET    /api/resume/me              - Get current user's resume
 resumeRouter.get("/me", authMiddleware, getMyResume);
 
+// GET    /api/resume/view            - View/proxy resume for preview
+resumeRouter.get("/view", authMiddleware, viewResume);
+
 // DELETE /api/resume/me              - Delete current user's resume
 resumeRouter.delete("/me", authMiddleware, deleteMyResume);
+
+// POST   /api/resume/start-existing   - Start interview with existing resume data (Ultra fast)
+resumeRouter.post(
+  "/start-existing",
+  authMiddleware,
+  startInterviewWithExistingResume,
+);
 
 // POST   /api/resume/reanalyse       - Re-run AI analysis on existing resume
 resumeRouter.post("/reanalyse", authMiddleware, reanalyseResume);

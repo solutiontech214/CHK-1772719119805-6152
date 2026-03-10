@@ -173,7 +173,7 @@ const handleTimeUp = async () => {
       const nextQ = data.questions.find((q) => !answeredIds.includes(q.id));
 
       if (!nextQ) {
-        completeSession();
+        handleFinishEarly(true);
         return;
       }
 
@@ -258,15 +258,33 @@ const handleTimeUp = async () => {
 
   };
 
-  /* ---------------- Complete Interview ---------------- */
-
-  const completeSession = async () => {
+  const handleFinishEarly = async (auto = false) => {
+    if (!auto && !window.confirm("Are you sure you want to finish the interview early?")) return;
 
     try {
       setLoading(true);
       clearInterval(timerRef.current);
       stopRecording();
+
       const token = localStorage.getItem("token");
+
+      // Submit current answer if not already evaluated
+      if (answer.trim() && !feedback) {
+        try {
+          await axios.post(
+            `http://localhost:3000/api/interview/${id}/answer`,
+            {
+              questionId: currentQuestion.id,
+              answer: answer,
+              timeTaken: 60 - timeLeft
+            },
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+        } catch (submitErr) {
+          console.error("Failed to submit final answer:", submitErr);
+          // Continue to complete session anyway
+        }
+      }
 
       const res = await axios.post(
         `http://localhost:3000/api/interview/${id}/complete`,
@@ -281,14 +299,11 @@ const handleTimeUp = async () => {
       }));
 
     } catch (err) {
-
       console.error(err);
-      setError("Failed to complete session");
-
+      setError("Failed to complete session early");
     } finally {
       setLoading(false);
     }
-
   };
 
   const handleNextQuestion = () => {
@@ -309,7 +324,7 @@ const handleTimeUp = async () => {
   };
 
   if (!session) {
-    return <div style={{ textAlign: "center", marginTop: "5rem" }}>Loading...</div>;
+    return <div style={{ textAlign: "center", paddingTop: 'clamp(2rem, 10vw, 5rem)', fontSize: 'clamp(1rem, 2vw, 1.125rem)', color: 'var(--text-secondary)' }}>Loading...</div>;
   }
 
   /* ---------------- Report Screen ---------------- */
@@ -319,19 +334,50 @@ const handleTimeUp = async () => {
     const report = session.report || {};
 
     return (
-      <div ref={containerRef} style={{ maxWidth: 800, margin: "auto", paddingTop: 40 }}>
+      <div ref={containerRef} style={{ maxWidth: 'clamp(100%, 800px, 100%)', margin: "0 auto", paddingTop: 'clamp(1.5rem, 4vw, 2.5rem)', paddingLeft: 'clamp(1rem, 3vw, 2rem)', paddingRight: 'clamp(1rem, 3vw, 2rem)', paddingBottom: 'clamp(2rem, 4vw, 3rem)' }}>
 
-        <h2 style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <CheckCircle color="#4caf50" /> Interview Completed
+        <h2 style={{ display: "flex", alignItems: "center", gap: 'clamp(0.5rem, 2vw, 0.75rem)', fontSize: 'clamp(1.5rem, 4vw, 2rem)', marginBottom: 'clamp(1.5rem, 3vw, 2rem)' }}>
+          <CheckCircle color="#4caf50" size={32} /> Interview Completed
         </h2>
 
-        <h3>Score: {report.overallScore || 0}/100</h3>
+        <div className="glass-panel" style={{ padding: 'clamp(1.25rem, 3vw, 2rem)', borderRadius: "12px" }}>
+          <h2 style={{ fontSize: 'clamp(1.5rem, 4vw, 2rem)', marginBottom: 'clamp(0.75rem, 2vw, 1rem)', color: "#4caf50" }}>{report.overallScore || 0}/100</h2>
+          
+          <div style={{ display: "grid", gridTemplateColumns: window.innerWidth <= 640 ? '1fr' : '1fr 1fr', gap: 'clamp(1rem, 2vw, 1.5rem)', marginBottom: 'clamp(1.25rem, 2vw, 1.5rem)' }}>
+            <div>
+              <p style={{ color: "var(--text-secondary)", fontSize: 'clamp(0.75rem, 1.2vw, 0.85rem)', marginBottom: '0.25rem' }}>OVERALL PERFORMANCE</p>
+              <p style={{ fontSize: 'clamp(0.95rem, 2vw, 1.1rem)' }}>{report.overallPerformance || "N/A"}</p>
+            </div>
+            <div>
+              <p style={{ color: "var(--text-secondary)", fontSize: 'clamp(0.75rem, 1.2vw, 0.85rem)', marginBottom: '0.25rem' }}>ENGLISH EFFICIENCY</p>
+              <p style={{ fontSize: 'clamp(0.95rem, 2vw, 1.1rem)' }}>{report.englishEfficiency || "N/A"}</p>
+            </div>
+            <div>
+              <p style={{ color: "var(--text-secondary)", fontSize: 'clamp(0.75rem, 1.2vw, 0.85rem)', marginBottom: '0.25rem' }}>CONFIDENCE LEVEL</p>
+              <p style={{ fontSize: 'clamp(0.95rem, 2vw, 1.1rem)' }}>{report.confidence || "N/A"}</p>
+            </div>
+          </div>
 
-        <p>{report.summary}</p>
+          <div style={{ marginBottom: 'clamp(1.25rem, 2vw, 1.5rem)' }}>
+            <p style={{ color: "var(--text-secondary)", fontSize: 'clamp(0.75rem, 1.2vw, 0.85rem)', marginBottom: '0.5rem' }}>SUMMARY</p>
+            <p style={{ fontSize: 'clamp(0.9rem, 1.5vw, 1rem)', lineHeight: "1.6" }}>{report.summary}</p>
+          </div>
 
-        <button onClick={() => navigate("/dashboard")}>
-          Back to Dashboard
-        </button>
+          {report.improvements && report.improvements.length > 0 && (
+            <div style={{ marginBottom: 'clamp(1.25rem, 2vw, 1.5rem)' }}>
+              <p style={{ color: "var(--text-secondary)", fontSize: 'clamp(0.75rem, 1.2vw, 0.85rem)', marginBottom: '0.5rem' }}>AREAS FOR IMPROVEMENT</p>
+              <ul style={{ paddingLeft: 'clamp(1rem, 2vw, 1.5rem)', margin: 0 }}>
+                {report.improvements.map((item, idx) => (
+                  <li key={idx} style={{ marginBottom: '0.5rem', fontSize: 'clamp(0.9rem, 1.5vw, 1rem)' }}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <button className="btn-primary" style={{ width: "100%", marginTop: 'clamp(1rem, 2vw, 1.5rem)' }} onClick={() => navigate("/dashboard")}>
+            Back to Dashboard
+          </button>
+        </div>
 
       </div>
     );
@@ -342,25 +388,25 @@ const handleTimeUp = async () => {
 
   return (
 
-    <div ref={containerRef} style={{ maxWidth: 800, margin: "auto", paddingTop: 40 }}>
+    <div ref={containerRef} style={{ maxWidth: 'clamp(100%, 800px, 100%)', margin: "0 auto", paddingTop: 'clamp(1.5rem, 4vw, 2.5rem)', paddingLeft: 'clamp(1rem, 3vw, 2rem)', paddingRight: 'clamp(1rem, 3vw, 2rem)', paddingBottom: 'clamp(2rem, 4vw, 3rem)' }}>
 
-      <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <h2 style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <Activity /> AI Interview
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: 'center', flexDirection: window.innerWidth <= 640 ? 'column' : 'row', gap: 'clamp(1rem, 2vw, 1.5rem)', marginBottom: 'clamp(1rem, 3vw, 1.5rem)' }}>
+        <h2 style={{ display: "flex", alignItems: "center", gap: 'clamp(0.5rem, 2vw, 0.75rem)', fontSize: 'clamp(1.3rem, 4vw, 1.75rem)' }}>
+          <Activity size={28} /> AI Interview
         </h2>
 
-        <div>
+        <div style={{ fontSize: 'clamp(0.85rem, 1.5vw, 1rem)', color: 'var(--text-secondary)' }}>
            {session.status === 'in-progress' && `Dynamic Session`}
         </div>
       </div>
 
-      <div style={{ marginBottom: 10, color: timeLeft < 10 ? "red" : "#aaa" }}>
+      <div style={{ marginBottom: 'clamp(1rem, 2vw, 1.5rem)', color: timeLeft < 10 ? "red" : "var(--text-secondary)", fontSize: 'clamp(0.9rem, 1.5vw, 1rem)', fontWeight: '500' }}>
         ⏱ Time Left: {timeLeft}s
       </div>
 
-      <div className="glass-panel" style={{ marginBottom: 20 }}>
+      <div className="glass-panel" style={{ marginBottom: 'clamp(1.25rem, 3vw, 2rem)', padding: 'clamp(1.25rem, 2vw, 1.5rem)' }}>
 
-        <p ref={questionRef} style={{ fontSize: "1.5rem" }}>
+        <p ref={questionRef} style={{ fontSize: 'clamp(1.2rem, 3vw, 1.5rem)', lineHeight: '1.6' }}>
           {currentQuestion?.question}
         </p>
 
@@ -368,21 +414,21 @@ const handleTimeUp = async () => {
 
       {feedback ? (
 
-        <div className="glass-panel">
+        <div className="glass-panel" style={{ padding: 'clamp(1.25rem, 2vw, 1.5rem)' }}>
 
-          <h3>AI Feedback</h3>
+          <h3 style={{ fontSize: 'clamp(1.1rem, 2.5vw, 1.25rem)', marginBottom: 'clamp(0.75rem, 2vw, 1rem)' }}>AI Feedback</h3>
 
-          <h2>{feedback.score}/100</h2>
+          <h2 style={{ fontSize: 'clamp(1.5rem, 3vw, 2rem)', color: '#4caf50', margin: 'clamp(0.75rem, 2vw, 1rem) 0' }}>{feedback.score}/100</h2>
 
-          <p>{feedback.feedback}</p>
+          <p style={{ fontSize: 'clamp(0.9rem, 1.5vw, 1rem)', lineHeight: '1.6', marginBottom: 'clamp(1rem, 2vw, 1.5rem)', color: 'var(--text-secondary)' }}>{feedback.feedback}</p>
 
-          <div style={{ display: "flex", gap: "10px" }}>
-            <button className="btn-primary" onClick={handleNextQuestion}>
+          <div style={{ display: "flex", flexDirection: window.innerWidth <= 640 ? 'column' : 'row', gap: 'clamp(0.75rem, 1.5vw, 1rem)' }}>
+            <button className="btn-primary" onClick={handleNextQuestion} style={{ flex: 1 }}>
               Next Question <ArrowRight size={18} />
             </button>
             
-            <button className="btn-outline" onClick={completeSession}>
-               Finish Interview Early
+            <button className="btn-outline" onClick={handleFinishEarly} style={{ flex: 1 }}>
+               Finish Interview
             </button>
           </div>
 
@@ -390,7 +436,7 @@ const handleTimeUp = async () => {
 
       ) : (
 
-        <div className="glass-panel">
+        <div className="glass-panel" style={{ padding: 'clamp(1.25rem, 2vw, 1.5rem)' }}>
 
           <VoiceWave active={isRecording} />
 
@@ -400,24 +446,28 @@ const handleTimeUp = async () => {
             placeholder="Type or speak your answer..."
             style={{
               width: "100%",
-              minHeight: 200,
-              marginBottom: 20
+              minHeight: 'clamp(150px, 30vh, 300px)',
+              marginBottom: 'clamp(1rem, 2vw, 1.5rem)',
+              padding: 'clamp(0.75rem, 1.5vw, 1rem)',
+              fontSize: 'clamp(0.9rem, 1.5vw, 1rem)',
+              borderRadius: '8px',
+              border: '1px solid var(--border-color)',
+              backgroundColor: 'var(--glass-bg)',
+              color: 'var(--text-primary)',
+              fontFamily: 'inherit',
+              resize: 'vertical'
             }}
           />
 
-          <div style={{ display: "flex", justifyContent: "space-between", gap: "10px" }}>
-            <div style={{ display: "flex", gap: "10px" }}>
-              <button onClick={toggleRecording} className="btn-outline">
-                {isRecording ? <MicOff /> : <Mic />} {isRecording ? "Stop Mic" : "Start Mic"}
+          <div style={{ display: "flex", flexDirection: window.innerWidth <= 640 ? 'column' : 'row', justifyContent: "space-between", gap: 'clamp(0.75rem, 1.5vw, 1rem)' }}>
+            <div style={{ display: "flex", flexDirection: window.innerWidth <= 640 ? 'column' : 'row', gap: 'clamp(0.75rem, 1.5vw, 1rem)', flex: 1 }}>
+              <button onClick={toggleRecording} className="btn-outline" style={{ flex: window.innerWidth <= 640 ? 1 : 'auto', whiteSpace: 'nowrap' }}>
+                {isRecording ? <MicOff size={20} /> : <Mic size={20} />} {isRecording ? "Stop Mic" : "Start Mic"}
               </button>
               <button
                 className="btn-outline"
-                style={{ borderColor: "#ff4d4d", color: "#ff4d4d" }}
-                onClick={() => {
-                   if(window.confirm("Are you sure you want to finish the interview early?")) {
-                      completeSession();
-                   }
-                }}
+                style={{ borderColor: "#ff4d4d", color: "#ff4d4d", flex: window.innerWidth <= 640 ? 1 : 'auto', whiteSpace: 'nowrap' }}
+                onClick={handleFinishEarly}
               >
                 Finish Early
               </button>
@@ -427,6 +477,7 @@ const handleTimeUp = async () => {
               className="btn-primary"
               onClick={() => submitAnswer(false)}
               disabled={loading || !answer.trim()}
+              style={{ flex: window.innerWidth <= 640 ? 1 : 'auto', whiteSpace: 'nowrap' }}
             >
               {loading ? "Evaluating..." : "Submit Answer"}
             </button>

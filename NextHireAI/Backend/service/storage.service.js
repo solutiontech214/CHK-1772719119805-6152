@@ -12,7 +12,9 @@ const uploadFile = async (
   mimetype,
   folder = "/NextHireAI/uploads",
 ) => {
-  console.log(`[Storage] Uploading ${fileName} (${buffer.length} bytes)...`);
+  console.log(
+    `[Storage] Uploading ${fileName} (${mimetype}, ${buffer.length} bytes)...`,
+  );
   try {
     const response = await client.files.upload({
       file: buffer.toString("base64"),
@@ -20,7 +22,11 @@ const uploadFile = async (
       folder: folder,
       useUniqueFileName: true,
     });
-    console.log(`[Storage] Upload success: ${response.url}`);
+    console.log(
+      `[Storage] Upload success: ${response.url} (fileType: ${response.fileType})`,
+    );
+    // Attach the original mimetype so controllers don't have to guess
+    response.mimeType = mimetype || response.fileType || "";
     return response;
   } catch (err) {
     console.error(`[Storage] Upload failed: ${err.message}`);

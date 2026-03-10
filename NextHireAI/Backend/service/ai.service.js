@@ -118,18 +118,17 @@ ${resumeText}
       messages: [
         {
           role: "system",
-          content:
-            "You are a professional HR data extraction bot. You output only valid JSON.",
+          content: "Extract professional info from resume. Output ONLY JSON.",
         },
         { role: "user", content: prompt },
       ],
-      temperature: 0,
-      max_tokens: 1500,
+      temperature: 0.1,
+      max_tokens: 800, // Reduced for speed
     });
 
     const result = extractJson(response.choices[0].message.content);
     console.log(
-      `[AI Service] Analysis complete for: ${result.name || "Unknown"}`,
+      `[AI Service] Analysis complete for: ${result?.name || "Unknown"}`,
     );
     return result;
   } catch (err) {
@@ -144,35 +143,61 @@ const generateInterviewQuestions = async (
   resume,
   jobRole,
   difficulty = "medium",
-  count = 2,
+  count = 5,
 ) => {
-  const questionCount = count;
+  const questionCount = Math.max(count, 5); // Ensure minimum 5 questions
   console.log(
     `[AI Service] Generating ${questionCount} initial questions for Job: ${jobRole}`,
   );
 
+  // Extract detailed resume info for dynamic questions
+  const skillsText = (resume.skills || []).join(", ") || "General skills";
+  const projectsText = (resume.projects || [])
+    .map((p) => `${p.name} (${(p.technologies || []).join(", ")})`)
+    .join("; ") || "General projects";
+  const experienceText = (resume.experience || [])
+    .map((e) => `${e.role} at ${e.company} (${e.duration})`)
+    .join("; ") || "General experience";
+  const educationText = (resume.education || [])
+    .map((ed) => `${ed.degree} from ${ed.institution}`)
+    .join("; ") || "General education";
+
   const prompt = `
-Task: Generate ${questionCount} initial warming-up interview questions for a candidate.
+Task: Generate ${questionCount} diverse and dynamic interview questions tailored to this candidate's profile.
 Job Role: ${jobRole}
-Difficulty: ${difficulty}
+Difficulty Level: ${difficulty}
 
-Skills from Resume: ${(resume.skills || []).join(", ")}
-Projects from Resume: ${(resume.projects || []).map((p) => p.name).join(", ")}
+CANDIDATE PROFILE:
+- Skills: ${skillsText}
+- Projects: ${projectsText}
+- Experience: ${experienceText}
+- Education: ${educationText}
 
-Required JSON Format (Array of objects):
+REQUIREMENTS:
+1. Generate AT LEAST ${questionCount} questions (not fewer)
+2. Questions MUST be specific to the candidate's skills, projects, and experience
+3. Mix question types: Technical, Behavioral, Situational, and HR questions
+4. Questions should progressively increase in depth
+5. Focus on: ${resume.skills?.slice(0, 3).join(", ") || "core competencies"} mentioned in resume
+6. Reference specific projects if available: ${resume.projects?.map((p) => p.name).slice(0, 2).join(", ") || "N/A"}
+
+OUTPUT FORMAT - Return ONLY valid JSON array:
 [
   {
     "id": 1,
-    "question": "The question text",
-    "category": "Technical | Behavioural | HR",
+    "question": "Specific question tailored to their experience/skills",
+    "category": "Technical | Behavioural | Situational | HR",
     "difficulty": "easy | medium | hard",
-    "expectedKeyPoints": ["point1", "point2"]
-  }
+    "expectedKeyPoints": ["specific point 1", "specific point 2", "specific point 3"]
+  },
+  ... (continue for all ${questionCount} questions)
 ]
 
-Constraints:
-1. Return ONLY the JSON array.
-2. Mix technical and behavioral questions properly.
+CONSTRAINTS:
+1. Each question must reference resume details
+2. No generic questions
+3. Return ONLY the JSON array, no markdown or extra text
+4. Ensure id field is unique (1, 2, 3, ...)
 `;
 
   try {
@@ -181,21 +206,98 @@ Constraints:
       messages: [
         {
           role: "system",
-          content:
-            "You are a senior technical interviewer. You respond only with a JSON array.",
+          content: "You are a senior tech interviewer. Generate diverse, resume-specific questions. Output ONLY JSON array.",
         },
         { role: "user", content: prompt },
       ],
       temperature: 0.7,
+      max_tokens: 2000, // Increased for more questions
     });
 
-    const questions = extractJson(response.choices[0].message.content);
+    let questions = extractJson(response.choices[0].message.content);
+    
+    // Validation: ensure we have at least 5 questions
+    if (!Array.isArray(questions) || questions.length < 5) {
+      console.warn(
+        `[AI Service] AI generated only ${questions?.length || 0} questions, using fallback...`,
+      );
+      questions = generateFallbackQuestions(resume, jobRole, difficulty, questionCount);
+    }
+
     console.log(`[AI Service] Generated ${questions?.length || 0} questions.`);
-    return questions;
+    return Array.isArray(questions) ? questions : [];
   } catch (err) {
     console.error("[AI Service] Question Generation Error:", err.message);
-    return [];
+    // Fallback if AI call fails
+    return generateFallbackQuestions(resume, jobRole, difficulty, questionCount);
   }
+};
+
+// Helper function to generate fallback questions based on resume details
+const generateFallbackQuestions = (resume, jobRole, difficulty, count) => {
+  const questions = [];
+  const skills = resume.skills || [];
+  const projects = resume.projects || [];
+  const experience = resume.experience || [];
+
+  // Template questions that reference resume details
+  const templates = [
+    {
+      getQuestion: () =>
+        `Can you walk us through your experience with ${skills[0] || "relevant technologies"} and how you've applied it in real projects?`,
+      category: "Technical",
+      difficulty: "medium",
+      expectedKeyPoints: ["experience", "application", "problem-solving"],
+    },
+    {
+      getQuestion: () =>
+        `Tell us about your project "${projects[0]?.name || "a significant project"}" - what were the technical challenges and how did you overcome them?`,
+      category: "Technical",
+      difficulty: "hard",
+      expectedKeyPoints: ["challenge", "solution", "technology stack"],
+    },
+    {
+      getQuestion: () =>
+        `How have you used ${skills[1] || "your core skills"} to make an impact at ${experience[0]?.company || "your organization"}?`,
+      category: "Behavioural",
+      difficulty: "medium",
+      expectedKeyPoints: ["impact", "skills", "results"],
+    },
+    {
+      getQuestion: () =>
+        `Describe a situation where you had to learn a new technology quickly. How did you approach it?`,
+      category: "Situational",
+      difficulty: "medium",
+      expectedKeyPoints: ["learning", "approach", "adaptability"],
+    },
+    {
+      getQuestion: () =>
+        `What aspects of the ${jobRole} role excite you most, and how do your skills align with this position?`,
+      category: "HR",
+      difficulty: "easy",
+      expectedKeyPoints: ["motivation", "alignment", "skills"],
+    },
+    {
+      getQuestion: () =>
+        `Tell us about a time when you collaborated with a team to deliver ${projects[0]?.name || "a project"}. What was your role?`,
+      category: "Behavioural",
+      difficulty: "medium",
+      expectedKeyPoints: ["teamwork", "role", "contribution"],
+    },
+  ];
+
+  // Generate the required number of questions
+  for (let i = 0; i < Math.min(count, templates.length); i++) {
+    questions.push({
+      id: i + 1,
+      question: templates[i].getQuestion(),
+      category: templates[i].category,
+      difficulty: templates[i].difficulty,
+      expectedKeyPoints: templates[i].expectedKeyPoints,
+    });
+  }
+
+  return questions.slice(0, count); // Ensure we return exactly 'count' questions
 };
 
 /* ---------------- ADAPTIVE NEXT QUESTION GENERATION ---------------- */
@@ -221,12 +323,13 @@ const generateNextAdaptiveQuestion = async (
     .join("\n\n");
 
   const prompt = `
-Task: Generate the NEXT interview question based on the conversation history. 
+Task: Generate the NEXT interview question. 
+Goal: If the candidate answered a technical question, follow up with a deeper technical question or a related practical scenario. If they answered a general question, move to a project-specific or behavioral question.
 Candidate Background: ${skillsText}
 Job Role: ${jobRole}
 Difficulty: ${difficulty}
 
-Conversation History so far:
+Conversation History so far (Important for follow-ups):
 ${historyText || "No history yet."}
 
 Return ONLY a JSON object:
@@ -245,11 +348,12 @@ Return ONLY a JSON object:
       messages: [
         {
           role: "system",
-          content: "You are an adaptive senior interviewer. Output ONLY JSON.",
+          content: "Adaptive interviewer. Output ONLY JSON.",
         },
         { role: "user", content: prompt },
       ],
-      temperature: 0.8,
+      temperature: 0.6,
+      max_tokens: 500,
     });
 
     const result = extractJson(response.choices[0].message.content);
@@ -273,32 +377,23 @@ Return ONLY a JSON object:
 /* ---------------- ANSWER EVALUATION ---------------- */
 
 const evaluateAnswer = async (question, answer, expectedKeyPoints = []) => {
-  console.log("[AI Service] Evaluating candidate answer...");
+  console.log("[AI Service] Evaluating candidate answer (fast mode)...");
 
   const points = (expectedKeyPoints || []).join(", ");
 
-  const prompt = `
-Task: Evaluate the candidate's response to an interview question.
-Important: The answer may be transcribed from speech, so please ignore minor grammatical glitches or filler words (like "um", "ah", "you know"). Focus on the core technical/professional value and communication clarity.
-
+  // Fast evaluation prompt - focused feedback only
+  const prompt = `Evaluate this interview answer CONCISELY:
 Question: ${question}
-Key Technical Points Expected: ${points}
-Candidate Answer: ${answer}
+Expected Points: ${points}
+Answer: ${answer}
 
-Judge the marks (score) out of 100 based on:
-1. Accuracy: Does it cover the expected points?
-2. Professionalism: Is the tone appropriate?
-3. Clarity: Is the explanation logical?
-
-Response Format (Respond ONLY with this JSON):
+Respond with ONLY this JSON (no markdown):
 {
-  "score": 0-100,
-  "feedback": "constructive professional feedback",
-  "strengths": ["list specific strengths"],
-  "improvements": ["list actionable improvements"],
-  "modelAnswer": "a comprehensive high-quality response example"
-}
-`;
+  "score": <0-100>,
+  "feedback": "1-2 sentence professional feedback",
+  "strengths": [<max 2 strings>],
+  "improvements": [<max 2 strings>]
+}`;
 
   try {
     const response = await openai.chat.completions.create({
@@ -306,12 +401,12 @@ Response Format (Respond ONLY with this JSON):
       messages: [
         {
           role: "system",
-          content:
-            "You are an expert technical interviewer. You output only valid JSON.",
+          content: "Evaluate answers quickly. Output ONLY valid JSON.",
         },
         { role: "user", content: prompt },
       ],
-      temperature: 0.2,
+      temperature: 0.5, // Increased for faster inference
+      max_tokens: 250, // Reduced from implied higher value
     });
 
     let evaluation = extractJson(response.choices[0].message.content);
@@ -328,15 +423,15 @@ Response Format (Respond ONLY with this JSON):
 
     // Ensure all required fields exist to prevent controller crashes
     return {
-      score: evaluation.score || 50,
-      feedback: evaluation.feedback || "Answer captured.",
+      score: Math.max(0, Math.min(100, evaluation.score || 50)),
+      feedback: evaluation.feedback || "Answer noted.",
       strengths: Array.isArray(evaluation.strengths)
-        ? evaluation.strengths
-        : ["Answer provided"],
+        ? evaluation.strengths.slice(0, 2)
+        : ["Good attempt"],
       improvements: Array.isArray(evaluation.improvements)
-        ? evaluation.improvements
-        : ["No specific improvements suggested"],
-      modelAnswer: evaluation.modelAnswer || "Model answer not generated.",
+        ? evaluation.improvements.slice(0, 2)
+        : ["Keep practicing"],
+      modelAnswer: "Available in next session", // Removed generation step
     };
   } catch (err) {
     console.error("[AI Service] Answer Evaluation Error:", err.message);
@@ -370,6 +465,7 @@ Respond ONLY with this JSON:
   "englishEfficiency": "string",
   "confidence": "string", 
   "overallPerformance": "string",
+  "summary": "a detailed overall summary of the interview",
   "improvements": ["string"],
   "overallScore": 0-100
 }
@@ -385,10 +481,33 @@ Respond ONLY with this JSON:
       temperature: 0.2,
     });
 
-    return extractJson(response.choices[0].message.content);
+    const report = extractJson(response.choices[0].message.content);
+
+    // Defensive normalization to match schema
+    return {
+      overallScore: report?.overallScore || 0,
+      overallPerformance: report?.overallPerformance || "Evaluation complete.",
+      englishEfficiency: report?.englishEfficiency || "Not assessed.",
+      confidence: report?.confidence || "Not assessed.",
+      summary: report?.summary || "Summary generation failed.",
+      improvements: Array.isArray(report?.improvements)
+        ? report.improvements
+        : [],
+      categoryScores: Array.isArray(report?.categoryScores)
+        ? report.categoryScores
+        : [],
+    };
   } catch (err) {
     console.error("[AI Service] Report Generation Error:", err.message);
-    throw err;
+    return {
+      overallScore: 0,
+      overallPerformance: "Error generating report.",
+      englishEfficiency: "N/A",
+      confidence: "N/A",
+      summary: "The AI encountered an error while finalizing your report.",
+      improvements: [],
+      categoryScores: [],
+    };
   }
 };
 
@@ -408,7 +527,7 @@ const analyseAndGenerateQuestions = async (
     analysis,
     jobRole,
     difficulty,
-    2, // Reduced to 2 for faster initial start
+    5, // Generate at least 5 dynamic questions
   );
 
   return {

@@ -18,7 +18,7 @@ const {
 // ─────────────────────────────────────────────────────────────────────────────
 const startSession = async (req, res) => {
   try {
-    const { jobRole, difficulty = "medium", questionCount = 10 } = req.body;
+    const { jobRole, difficulty = "medium", questionCount = 5 } = req.body;
 
     if (!jobRole) {
       return res.status(400).json({ message: "jobRole is required" });
@@ -39,8 +39,8 @@ const startSession = async (req, res) => {
       ? difficulty
       : "medium";
 
-    // Clamp question count
-    const count = Math.min(Math.max(parseInt(questionCount) || 10, 3), 20);
+    // Ensure at least 5 questions, max 10
+    const count = Math.min(Math.max(parseInt(questionCount) || 5, 5), 10);
 
     // Generate questions via AI
     const questions = await generateInterviewQuestions(

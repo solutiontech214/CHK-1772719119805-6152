@@ -15,6 +15,10 @@ const resumeSchema = new mongoose.Schema(
     fileName: {
       type: String,
     },
+    mimeType: {
+      type: String,
+      default: "application/pdf",
+    },
     rawText: {
       type: String,
     },

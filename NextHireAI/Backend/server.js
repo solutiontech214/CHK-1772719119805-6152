@@ -9,6 +9,7 @@ const resumeRouter = require("./routes/resume.routes");
 const interviewRouter = require("./routes/interview.routes");
 const profileRouter = require("./routes/profile.routes");
 const aiRouter = require("./routes/ai.routes");
+const documentRouter = require("./routes/document.routes");
 
 // ── Connect DB ────────────────────────────────────────────────────────────────
 connectDb();
@@ -20,6 +21,7 @@ app.use("/api/resume", resumeRouter);
 app.use("/api/interview", interviewRouter);
 app.use("/api/profile", profileRouter);
 app.use("/api/ai", aiRouter);
+app.use("/api/documents", documentRouter);
 
 // ── 404 handler ───────────────────────────────────────────────────────────────
 app.use((req, res) => {

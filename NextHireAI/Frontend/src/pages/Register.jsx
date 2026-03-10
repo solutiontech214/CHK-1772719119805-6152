@@ -41,20 +41,20 @@ export default function Register() {
   };
 
   return (
-    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
+    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', paddingTop: 'clamp(1rem, 2vw, 2rem)', paddingBottom: 'clamp(1rem, 2vw, 2rem)' }}>
       <div 
         ref={formRef} 
         className="glass-panel" 
-        style={{ width: '100%', maxWidth: '400px', padding: '3rem' }}
+        style={{ width: '100%', maxWidth: 'clamp(290px, 90vw, 400px)', padding: 'clamp(1.5rem, 4vw, 3rem)' }}
       >
-        <h2 style={{ fontSize: '2rem', marginBottom: '0.5rem', textAlign: 'center' }}>Create Account</h2>
-        <p style={{ color: 'var(--text-secondary)', textAlign: 'center', marginBottom: '2rem' }}>
+        <h2 style={{ fontSize: 'clamp(1.5rem, 4vw, 2rem)', marginBottom: 'clamp(0.25rem, 1vw, 0.5rem)', textAlign: 'center' }}>Create Account</h2>
+        <p style={{ color: 'var(--text-secondary)', textAlign: 'center', marginBottom: 'clamp(1.25rem, 3vw, 2rem)', fontSize: 'clamp(0.9rem, 1.5vw, 1rem)' }}>
           Start your journey with NextHireAI.
         </p>
         
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 'clamp(1rem, 2vw, 1.5rem)' }}>
           <div>
-            <label className="label">Name</label>
+            <label className="label" style={{ fontSize: 'clamp(0.85rem, 1.5vw, 0.95rem)' }}>Name</label>
             <input 
               type="text" 
               value={name} 
@@ -65,7 +65,7 @@ export default function Register() {
             />
           </div>
           <div>
-            <label className="label">Email</label>
+            <label className="label" style={{ fontSize: 'clamp(0.85rem, 1.5vw, 0.95rem)' }}>Email</label>
             <input 
               type="email" 
               value={email} 
@@ -76,7 +76,7 @@ export default function Register() {
             />
           </div>
           <div>
-            <label className="label">Password</label>
+            <label className="label" style={{ fontSize: 'clamp(0.85rem, 1.5vw, 0.95rem)' }}>Password</label>
             <input 
               type="password" 
               value={password} 
@@ -87,14 +87,14 @@ export default function Register() {
             />
           </div>
           
-          {error && <div className="error-text">{error}</div>}
+          {error && <div className="error-text" style={{ fontSize: 'clamp(0.85rem, 1.5vw, 0.95rem)' }}>{error}</div>}
           
-          <button type="submit" className="btn-primary" disabled={loading} style={{ marginTop: '1rem' }}>
+          <button type="submit" className="btn-primary" disabled={loading} style={{ marginTop: 'clamp(0.75rem, 1.5vw, 1rem)' }}>
             {loading ? 'Creating account...' : 'Sign Up'}
           </button>
         </form>
 
-        <p style={{ textAlign: 'center', marginTop: '2rem', color: 'var(--text-secondary)' }}>
+        <p style={{ textAlign: 'center', marginTop: 'clamp(1.25rem, 3vw, 2rem)', color: 'var(--text-secondary)', fontSize: 'clamp(0.85rem, 1.5vw, 0.95rem)' }}>
           Already have an account? <Link to="/login" style={{ color: 'var(--text-primary)', textDecoration: 'underline' }}>Sign In</Link>
         </p>
       </div>

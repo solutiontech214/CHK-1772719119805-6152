@@ -59,26 +59,17 @@ const interviewSessionSchema = new mongoose.Schema(
     // Final report (generated after session completes)
     report: {
       overallScore: Number,
-      performanceLevel: String,
+      overallPerformance: String,
+      englishEfficiency: String,
+      confidence: String,
       summary: String,
-      categoryScores: {
-        Technical: Number,
-        Behavioural: Number,
-        Situational: Number,
-        HR: Number,
-      },
-      topStrengths: [String],
-      areasToImprove: [String],
-      recommendedResources: [
+      improvements: [String],
+      categoryScores: [
         {
-          title: String,
-          type: String,
-          description: String,
+          category: String,
+          score: Number,
         },
       ],
-      nextSteps: [String],
-      hiringRecommendation: String,
-      hiringComment: String,
     },
     startedAt: {
       type: Date,

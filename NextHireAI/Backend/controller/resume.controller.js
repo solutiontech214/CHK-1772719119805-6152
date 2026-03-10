@@ -1,9 +1,11 @@
 const resumeModel = require("../models/resume.model");
 const uploadFile = require("../service/storage.service");
+const axios = require("axios");
 const {
   analyseResume,
   extractTextFromBuffer,
   analyseAndGenerateQuestions,
+  generateInterviewQuestions,
 } = require("../service/ai.service");
 const interviewSessionModel = require("../models/interview.model");
 
@@ -242,6 +244,7 @@ const uploadAndStartSession = async (req, res) => {
         userId: req.user.id,
         fileUrl: uploaded.url,
         fileName: req.file.originalname,
+        mimeType: req.file.mimetype,
         rawText,
         analysedAt: new Date(),
         ...(oneShotResult.analysis || {}),
@@ -259,6 +262,7 @@ const uploadAndStartSession = async (req, res) => {
       jobRole,
       difficulty,
       questions,
+      status: "in-progress",
     });
 
     const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
@@ -283,10 +287,140 @@ const uploadAndStartSession = async (req, res) => {
   }
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/resume/start-existing
+// Start interview with currently uploaded resume (Bypasses upload & re-analysis)
+// ─────────────────────────────────────────────────────────────────────────────
+const startInterviewWithExistingResume = async (req, res) => {
+  const startTime = Date.now();
+  try {
+    const { jobRole = "Software Engineer", difficulty = "medium" } = req.body;
+
+    const resume = await resumeModel.findOne({ userId: req.user.id });
+    if (!resume) {
+      return res
+        .status(404)
+        .json({ message: "No resume found. Please upload one first." });
+    }
+
+    console.log(
+      `[Resume Controller] Fast-starting interview for user: ${req.user.id}`,
+    );
+
+    // Generate at least 5 questions for the interview
+    const questions = await generateInterviewQuestions(
+      resume,
+      jobRole,
+      difficulty,
+      5, // Ensure minimum 5 questions
+    );
+
+    const session = await interviewSessionModel.create({
+      userId: req.user.id,
+      resumeId: resume._id,
+      jobRole,
+      difficulty,
+      questions:
+        questions && questions.length >= 5
+          ? questions
+          : [
+              {
+                id: 1,
+                question: "Tell me about your technical background.",
+                category: "Technical",
+                difficulty: "easy",
+                expectedKeyPoints: ["experience"],
+              },
+              {
+                id: 2,
+                question: "Describe your most challenging project.",
+                category: "Technical",
+                difficulty: "medium",
+                expectedKeyPoints: ["problem", "solution"],
+              },
+              {
+                id: 3,
+                question: "What are your key strengths?",
+                category: "HR",
+                difficulty: "easy",
+                expectedKeyPoints: ["skills", "fit"],
+              },
+              {
+                id: 4,
+                question: "How do you handle team collaboration?",
+                category: "Behavioural",
+                difficulty: "medium",
+                expectedKeyPoints: ["teamwork"],
+              },
+              {
+                id: 5,
+                question: "What are your career goals?",
+                category: "HR",
+                difficulty: "easy",
+                expectedKeyPoints: ["growth"],
+              },
+            ],
+      status: "in-progress",
+    });
+
+    const totalTime = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.log(`[Resume Controller] Fast Start SUCCESS! Time: ${totalTime}s`);
+
+    return res.status(200).json({
+      message: "Interview started with existing resume.",
+      sessionId: session._id,
+      questionsCount: session.questions.length,
+    });
+  } catch (error) {
+    console.error("[Resume Controller] Fast Start Error:", error);
+    return res
+      .status(500)
+      .json({ message: "Server error", error: error.message });
+  }
+};
+
+const viewResume = async (req, res) => {
+  try {
+    // Fetch resume from database
+    const resume = await resumeModel.findOne({ userId: req.user.id });
+
+    if (!resume) {
+      return res.status(404).json({ message: "Resume not found" });
+    }
+
+    // Fetch file from ImageKit using the stored URL
+    const response = await axios.get(resume.fileUrl, {
+      responseType: "arraybuffer",
+      headers: {
+        "User-Agent": "NextHireAI-Server/1.0",
+      },
+    });
+
+    // Set appropriate headers for PDF preview
+    res.set({
+      "Content-Type": "application/pdf",
+      "Content-Disposition": 'inline; filename="' + resume.fileName + '"',
+      "Cache-Control": "public, max-age=3600",
+      "Access-Control-Allow-Origin": "*",
+    });
+
+    if (response.headers["content-length"]) {
+      res.set("Content-Length", response.headers["content-length"]);
+    }
+
+    return res.send(response.data);
+  } catch (error) {
+    console.error("viewResume error:", error);
+    return res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
 module.exports = {
   uploadResume,
   getMyResume,
   deleteMyResume,
   reanalyseResume,
   uploadAndStartSession,
+  startInterviewWithExistingResume,
+  viewResume,
 };
