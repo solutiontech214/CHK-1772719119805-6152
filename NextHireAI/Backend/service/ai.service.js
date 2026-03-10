@@ -96,16 +96,38 @@ const analyseResume = async (resumeText, fileData = null) => {
   );
 
   const prompt = `
-Task: Analyse the resume text provided below and extract essential professional details.
+Task: Analyse the resume text provided below and extract detailed professional information.
 Constraint: Respond ONLY with a valid JSON object. Do not include markdown or conversational text.
 
 Required JSON Structure:
 {
 "name": "Full Name",
-"skills": ["Skill1", "Skill2"],
-"projects": [{"name": "P1", "description": "D1"}],
-"experience": [{"company": "C1", "role": "R1"}],
-"education": [{"institution": "I1", "degree": "Deg1"}]
+"email": "Email Address",
+"phone": "Phone Number",
+"summary": "Professional Summary",
+"skills": ["Skill1", "Skill2", "Skill3"],
+"projects": [
+  {
+    "name": "Project Name", 
+    "description": "Specific details of what was achieved", 
+    "technologies": ["Tech1", "Tech2"]
+  }
+],
+"experience": [
+  {
+    "company": "Company Name", 
+    "role": "Job Title", 
+    "duration": "Start - End Date", 
+    "highlights": ["Specific achievement 1", "Specific achievement 2"]
+  }
+],
+"education": [
+  {
+    "institution": "University Name", 
+    "degree": "Degree Name", 
+    "year": "Graduation Year"
+  }
+]
 }
 
 Resume Content:
@@ -118,12 +140,13 @@ ${resumeText}
       messages: [
         {
           role: "system",
-          content: "Extract professional info from resume. Output ONLY JSON.",
+          content:
+            "Extract comprehensive professional info from resume. Be detailed about projects and achievements. Output ONLY JSON.",
         },
         { role: "user", content: prompt },
       ],
       temperature: 0.1,
-      max_tokens: 800, // Reduced for speed
+      max_tokens: 1500, // Increased for more details
     });
 
     const result = extractJson(response.choices[0].message.content);
@@ -152,40 +175,66 @@ const generateInterviewQuestions = async (
 
   // Extract detailed resume info for dynamic questions
   const skillsText = (resume.skills || []).join(", ") || "General skills";
-  const projectsText = (resume.projects || [])
-    .map((p) => `${p.name} (${(p.technologies || []).join(", ")})`)
-    .join("; ") || "General projects";
-  const experienceText = (resume.experience || [])
-    .map((e) => `${e.role} at ${e.company} (${e.duration})`)
-    .join("; ") || "General experience";
-  const educationText = (resume.education || [])
-    .map((ed) => `${ed.degree} from ${ed.institution}`)
-    .join("; ") || "General education";
+
+  // Shuffle projects and experience to get different focus each time
+  const shuffledProjects = [...(resume.projects || [])].sort(
+    () => 0.5 - Math.random(),
+  );
+  const shuffledExperience = [...(resume.experience || [])].sort(
+    () => 0.5 - Math.random(),
+  );
+
+  const projectsText =
+    shuffledProjects
+      .map(
+        (p) =>
+          `${p.name} using [${(p.technologies || []).join(", ")}]. Details: ${p.description || "N/A"}`,
+      )
+      .join("; ") || "General projects";
+
+  const experienceText =
+    shuffledExperience
+      .map(
+        (e) =>
+          `${e.role} at ${e.company} (${e.duration}). Achievements: ${(e.highlights || []).join(". ")}`,
+      )
+      .join("; ") || "General experience";
+
+  const educationText =
+    (resume.education || [])
+      .map((ed) => `${ed.degree} from ${ed.institution} (${ed.year || "N/A"})`)
+      .join("; ") || "General education";
+
+  // Pick a random set of skills to focus on
+  const skillsToFocus = [...(resume.skills || [])]
+    .sort(() => 0.5 - Math.random())
+    .slice(0, 5);
 
   const prompt = `
-Task: Generate ${questionCount} diverse and dynamic interview questions tailored to this candidate's profile.
+Task: Generate ${questionCount} HIGHLY SPECIFIC, UNIQUE, and DIVERSE interview questions tailored to this candidate's resume for the role of ${jobRole}.
 Job Role: ${jobRole}
 Difficulty Level: ${difficulty}
 
-CANDIDATE PROFILE:
+CANDIDATE RESUME PROFILE:
 - Skills: ${skillsText}
 - Projects: ${projectsText}
 - Experience: ${experienceText}
 - Education: ${educationText}
 
 REQUIREMENTS:
-1. Generate AT LEAST ${questionCount} questions (not fewer)
-2. Questions MUST be specific to the candidate's skills, projects, and experience
-3. Mix question types: Technical, Behavioral, Situational, and HR questions
-4. Questions should progressively increase in depth
-5. Focus on: ${resume.skills?.slice(0, 3).join(", ") || "core competencies"} mentioned in resume
-6. Reference specific projects if available: ${resume.projects?.map((p) => p.name).slice(0, 2).join(", ") || "N/A"}
+1. Generate EXACTLY ${questionCount} questions.
+2. Questions MUST be deeply tailored to the SPECIFIC projects, roles, and achievements listed in the resume. 
+3. AVOID generic questions like "Tell me about yourself" or "What are your strengths".
+4. Focus MUST be on how they used their skills (${skillsToFocus.join(", ")}) in their specific projects or roles.
+5. Each question should feel like it could ONLY be asked to this specific candidate.
+6. Mix technical depth with practical application based on their specific experience.
+7. Cover different areas: technical implementation, problem-solving in a specific project, and role-specific challenges at a particular company.
 
 OUTPUT FORMAT - Return ONLY valid JSON array:
 [
   {
     "id": 1,
-    "question": "Specific question tailored to their experience/skills",
+    "question": "Specific question referencing a project/role from the resume",
     "category": "Technical | Behavioural | Situational | HR",
     "difficulty": "easy | medium | hard",
     "expectedKeyPoints": ["specific point 1", "specific point 2", "specific point 3"]
@@ -194,9 +243,9 @@ OUTPUT FORMAT - Return ONLY valid JSON array:
 ]
 
 CONSTRAINTS:
-1. Each question must reference resume details
-2. No generic questions
-3. Return ONLY the JSON array, no markdown or extra text
+1. NO generic filler questions.
+2. Every question MUST reference a detail from the resume (e.g., "At [Company], you worked on [Project]...", "Using [Technology] for [Project]...", "In your role as [Role]...").
+3. Return ONLY the JSON array, no markdown or extra text.
 4. Ensure id field is unique (1, 2, 3, ...)
 `;
 
@@ -206,22 +255,27 @@ CONSTRAINTS:
       messages: [
         {
           role: "system",
-          content: "You are a senior tech interviewer. Generate diverse, resume-specific questions. Output ONLY JSON array.",
+          content: `You are an elite technical interviewer at a Tier-1 tech company. You are known for asking deep, project-specific questions that test a candidate's actual experience rather than their memorization. Use the resume provided to construct unique questions.`,
         },
         { role: "user", content: prompt },
       ],
-      temperature: 0.7,
-      max_tokens: 2000, // Increased for more questions
+      temperature: 0.8, // Slightly higher for more variety
+      max_tokens: 2500,
     });
 
     let questions = extractJson(response.choices[0].message.content);
-    
+
     // Validation: ensure we have at least 5 questions
     if (!Array.isArray(questions) || questions.length < 5) {
       console.warn(
         `[AI Service] AI generated only ${questions?.length || 0} questions, using fallback...`,
       );
-      questions = generateFallbackQuestions(resume, jobRole, difficulty, questionCount);
+      questions = generateFallbackQuestions(
+        resume,
+        jobRole,
+        difficulty,
+        questionCount,
+      );
     }
 
     console.log(`[AI Service] Generated ${questions?.length || 0} questions.`);
@@ -229,7 +283,12 @@ CONSTRAINTS:
   } catch (err) {
     console.error("[AI Service] Question Generation Error:", err.message);
     // Fallback if AI call fails
-    return generateFallbackQuestions(resume, jobRole, difficulty, questionCount);
+    return generateFallbackQuestions(
+      resume,
+      jobRole,
+      difficulty,
+      questionCount,
+    );
   }
 };
 
@@ -313,32 +372,63 @@ const generateNextAdaptiveQuestion = async (
     `[AI Service] Generating next dynamic question (ID: ${nextId})...`,
   );
 
-  // Safety check for resume
-  const skillsText = resume?.skills?.join(", ") || "General skills";
+  // Extract detailed resume info
+  const skillsText = (resume?.skills || []).join(", ") || "General skills";
+
+  // Shuffle projects and experience for variety in the adaptive questions too
+  const shuffledProjects = [...(resume?.projects || [])].sort(
+    () => 0.5 - Math.random(),
+  );
+  const shuffledExperience = [...(resume?.experience || [])].sort(
+    () => 0.5 - Math.random(),
+  );
+
   const projectsText =
-    resume?.projects?.map((p) => p.name).join(", ") || "General projects";
+    shuffledProjects
+      .map(
+        (p) =>
+          `${p.name} using [${(p.technologies || []).join(", ")}]. Details: ${p.description || "N/A"}`,
+      )
+      .join("; ") || "General projects";
+
+  const experienceText =
+    shuffledExperience
+      .map(
+        (e) =>
+          `${e.role} at ${e.company} (${e.duration}). Achievements: ${(e.highlights || []).join(". ")}`,
+      )
+      .join("; ") || "General experience";
 
   const historyText = (history || [])
     .map((h, i) => `Q${i + 1}: ${h.question}\nA${i + 1}: ${h.userAnswer}`)
     .join("\n\n");
 
   const prompt = `
-Task: Generate the NEXT interview question. 
-Goal: If the candidate answered a technical question, follow up with a deeper technical question or a related practical scenario. If they answered a general question, move to a project-specific or behavioral question.
-Candidate Background: ${skillsText}
+Task: Generate the NEXT HIGHLY SPECIFIC interview question that builds on the conversation history but explores a NEW area of the resume.
 Job Role: ${jobRole}
 Difficulty: ${difficulty}
 
-Conversation History so far (Important for follow-ups):
+CANDIDATE BACKGROUND:
+- Skills: ${skillsText}
+- Projects: ${projectsText}
+- Experience: ${experienceText}
+
+CONVERSATION HISTORY (DO NOT repeat these topics or ask similar questions):
 ${historyText || "No history yet."}
+
+GOAL:
+1. Create a completely NEW, UNIQUE question that hasn't been asked before.
+2. If the previous question was technical, consider moving to a situational scenario involving a DIFFERENT project or role mentioned in the resume.
+3. Reference a SPECIFIC achievement or technology from the resume that HAS NOT BEEN DISCUSSED YET.
+4. Ensure the question is deeply personalized to this candidate's background.
 
 Return ONLY a JSON object:
 {
   "id": ${nextId},
-  "question": "The specific interview question",
+  "question": "A completely new, resume-specific interview question exploring an untouched area of their background",
   "category": "Technical | Behavioural | Situational",
   "difficulty": "${difficulty}",
-  "expectedKeyPoints": ["key point 1", "key point 2"]
+  "expectedKeyPoints": ["key point 1", "key point 2", "key point 3"]
 }
 `;
 
@@ -348,12 +438,13 @@ Return ONLY a JSON object:
       messages: [
         {
           role: "system",
-          content: "Adaptive interviewer. Output ONLY JSON.",
+          content:
+            "You are an adaptive interviewer. Your goal is to cover as much of the candidate's resume as possible. Generate unique, diverse questions that build on conversation history without any repetition of topics. Output ONLY JSON.",
         },
         { role: "user", content: prompt },
       ],
-      temperature: 0.6,
-      max_tokens: 500,
+      temperature: 0.9, // Higher for more adaptive variety
+      max_tokens: 800,
     });
 
     const result = extractJson(response.choices[0].message.content);

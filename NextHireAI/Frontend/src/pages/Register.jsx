@@ -64,7 +64,7 @@ export default function Register() {
               value={name} 
               onChange={(e) => setName(e.target.value)} 
               className="input-field" 
-              placeholder="John Doe"
+              placeholder="Samarth Patil"
               required 
             />
           </div>
@@ -75,7 +75,7 @@ export default function Register() {
               value={email} 
               onChange={(e) => setEmail(e.target.value)} 
               className="input-field" 
-              placeholder="you@example.com"
+              placeholder="samarthpatil@example.com.com"
               required 
             />
           </div>

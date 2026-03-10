@@ -230,17 +230,26 @@ const handleTimeUp = async () => {
       );
 
       setFeedback(res.data.evaluation);
-      
-      // Update local session state (answers and possibly next dynamic question)
+
+      // Update local session state with the submitted answer and new question
       setSession(prev => {
-        const updatedQuestions = res.data.nextQuestion 
-          ? [...prev.questions, res.data.nextQuestion] 
+        if (!prev) return prev;
+
+        const updatedAnswers = [...(prev.answers || []), {
+          questionId: currentQuestion.id,
+          question: currentQuestion.question,
+          userAnswer: answer || "No answer provided",
+          score: res.data.evaluation.score
+        }];
+
+        const updatedQuestions = res.data.nextQuestion
+          ? [...prev.questions, res.data.nextQuestion]
           : prev.questions;
-          
+
         return {
           ...prev,
           questions: updatedQuestions,
-          answers: [...(prev.answers || []), { questionId: currentQuestion.id }]
+          answers: updatedAnswers
         };
       });
 
@@ -307,10 +316,28 @@ const handleTimeUp = async () => {
   };
 
   const handleNextQuestion = () => {
-
     clearInterval(timerRef.current);
-    fetchSession(); // Re-fetch to sync state or just manually set next question
 
+    // Instead of re-fetching, use the updated session state to find next question
+    setSession(prev => {
+      if (!prev || !prev.questions) return prev;
+
+      const answeredIds = prev.answers?.map((a) => a.questionId) || [];
+      const nextQ = prev.questions.find((q) => !answeredIds.includes(q.id));
+
+      if (nextQ) {
+        setCurrentQuestion(nextQ);
+        setAnswer("");
+        setFeedback(null);
+        speakQuestion(nextQ.question);
+        startTimer();
+      } else {
+        // No more questions, finish interview
+        handleFinishEarly(true);
+      }
+
+      return prev;
+    });
   };
 
   /* ---------------- Mic Toggle ---------------- */
