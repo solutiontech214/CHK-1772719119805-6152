@@ -1,19 +1,18 @@
 import { Link } from 'react-router-dom';
 import { Layers, User, LogOut, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
+import { useAuth } from '../context/AuthContext';
 import ThemeToggle from './ThemeToggle';
 import DocumentSidebar from './DocumentSidebar';
 
 export default function Navbar() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const { isAuthenticated, logout, user } = useAuth();
 
   const handleLogout = () => {
-    // clear tokens/auth state
-    localStorage.removeItem('token');
+    logout();
     window.location.href = '/login';
   };
-
-  const isAuth = !!localStorage.getItem('token'); // Basic check
 
   return (
     <>
@@ -38,7 +37,7 @@ export default function Navbar() {
         
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
           <ThemeToggle />
-          {isAuth ? (
+          {isAuthenticated ? (
             <>
               <button 
                 onClick={() => setIsSidebarOpen(true)} 

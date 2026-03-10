@@ -9,65 +9,102 @@ const register = async (req, res) => {
 
     const { email, password, name } = req.body;
 
+    // Enhanced validation
     if (!email || !password || !name) {
         return res.status(400).json({
             message: "All fields are required"
         });
     }
 
+    // Email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+        return res.status(400).json({
+            message: "Please enter a valid email address"
+        });
+    }
+
+    // Password validation
+    if (password.length < 6) {
+        return res.status(400).json({
+            message: "Password must be at least 6 characters long"
+        });
+    }
+
+    // Name validation
+    if (name.trim().length < 2) {
+        return res.status(400).json({
+            message: "Name must be at least 2 characters long"
+        });
+    }
+
     try {
 
-        const existingUser = await userModel.findOne({ email });
+        const existingUser = await userModel.findOne({ email: email.toLowerCase() });
 
         if (existingUser) {
             return res.status(400).json({
-                message: "User already exists"
+                message: "User already exists with this email"
             });
         }
 
-        const hashedPassword = await bcrypt.hash(password, 10);
+        const hashedPassword = await bcrypt.hash(password, 12); // Increased rounds for better security
 
         const newUser = await userModel.create({
-            email,
+            email: email.toLowerCase(),
             password: hashedPassword,
-            name
+            name: name.trim()
         });
-await sendEmail(
-email,
-"Welcome to NextHireAI",
-name,
- `
-    <div style="font-family:Arial;max-width:600px;margin:auto;border:1px solid #000;padding:20px">
-        <h2 style="color:black;">Welcome to NextHireAI</h2>
-        <p>Hello <b>${name}</b>,</p>
-        <p>Your account has been successfully created on our AI Interview Preparation Platform.</p>
-        <p>You can now start practicing interviews and analyzing your resume.</p>
-        <br>
-        <p><b>NextHireAI Team</b></p>
-    </div>
-    `
-);
+
+        // Send welcome email (non-blocking)
+        try {
+            await sendEmail(
+                email,
+                "Welcome to NextHireAI",
+                name,
+                `
+                <div style="font-family:Arial;max-width:600px;margin:auto;border:1px solid #000;padding:20px">
+                    <h2 style="color:black;">Welcome to NextHireAI</h2>
+                    <p>Hello <b>${name}</b>,</p>
+                    <p>Your account has been successfully created on our AI Interview Preparation Platform.</p>
+                    <p>You can now start practicing interviews and analyzing your resume.</p>
+                    <br>
+                    <p><b>NextHireAI Team</b></p>
+                </div>
+                `
+            );
+        } catch (emailError) {
+            console.error('Welcome email failed:', emailError);
+            // Don't fail registration if email fails
+        }
+
         const token = jwt.sign(
-            { id: newUser._id },
+            { id: newUser._id, email: newUser.email },
             process.env.JWT_SECRET,
-            { expiresIn: "1h" }
+            { expiresIn: "7d" } // Extended to 7 days
         );
 
         res.cookie("token", token, {
-            httpOnly: true
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
         });
 
         return res.status(201).json({
             message: "User registered successfully",
-            token
+            token,
+            user: {
+                id: newUser._id,
+                name: newUser.name,
+                email: newUser.email
+            }
         });
 
     } catch (error) {
-
-        console.log(error);
-
+        console.error('Registration error:', error);
         return res.status(500).json({
-            message: "Server error"
+            message: "Server error during registration"
         });
     }
 };
@@ -75,19 +112,28 @@ const login = async (req, res) => {
 
     const { email, password } = req.body;
 
+    // Enhanced validation
     if (!email || !password) {
         return res.status(400).json({
-            message: "All fields are required"
+            message: "Email and password are required"
+        });
+    }
+
+    // Email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+        return res.status(400).json({
+            message: "Please enter a valid email address"
         });
     }
 
     try {
 
-        const user = await userModel.findOne({ email });
+        const user = await userModel.findOne({ email: email.toLowerCase() });
 
         if (!user) {
-            return res.status(404).json({
-                message: "User not found"
+            return res.status(401).json({
+                message: "Invalid email or password"
             });
         }
 
@@ -95,31 +141,38 @@ const login = async (req, res) => {
 
         if (!isPasswordValid) {
             return res.status(401).json({
-                message: "Invalid credentials"
+                message: "Invalid email or password"
             });
         }
 
         const token = jwt.sign(
-            { id: user._id },
+            { id: user._id, email: user.email },
             process.env.JWT_SECRET,
-            { expiresIn: "1h" }
+            { expiresIn: "7d" } // Extended to 7 days
         );
 
         res.cookie("token", token, {
-            httpOnly: true
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
         });
 
         return res.status(200).json({
             message: "Login successful",
-            token
+            token,
+            user: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                avatar: user.avatar
+            }
         });
 
     } catch (error) {
-
-        console.log(error);
-
+        console.error('Login error:', error);
         return res.status(500).json({
-            message: "Server error"
+            message: "Server error during login"
         });
     }
 };
@@ -138,32 +191,79 @@ const getMe = async (req, res) => {
         }
 
         return res.status(200).json({
-            user
+            user: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                avatar: user.avatar,
+                bio: user.bio,
+                targetRole: user.targetRole,
+                phone: user.phone,
+                stats: user.stats,
+                createdAt: user.createdAt
+            }
         });
 
     } catch (error) {
-
-        console.log(error);
-
+        console.error('Get user error:', error);
         return res.status(500).json({
             message: "Server error"
         });
     }
 };
 
+const refreshToken = async (req, res) => {
+    try {
+        const user = await userModel.findById(req.user.id).select("-password");
+
+        if (!user) {
+            return res.status(404).json({
+                message: "User not found"
+            });
+        }
+
+        const newToken = jwt.sign(
+            { id: user._id, email: user.email },
+            process.env.JWT_SECRET,
+            { expiresIn: "7d" }
+        );
+
+        res.cookie("token", newToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'strict',
+            maxAge: 7 * 24 * 60 * 60 * 1000
+        });
+
+        return res.status(200).json({
+            message: "Token refreshed",
+            token: newToken
+        });
+
+    } catch (error) {
+        console.error('Token refresh error:', error);
+        return res.status(500).json({
+            message: "Server error"
+        });
+    }
+};
 
 const changePassword = async (req, res) => {
-
     const { currentPassword, newPassword } = req.body;
 
     if (!currentPassword || !newPassword) {
         return res.status(400).json({
-            message: "All fields are required"
+            message: "Current password and new password are required"
+        });
+    }
+
+    if (newPassword.length < 6) {
+        return res.status(400).json({
+            message: "New password must be at least 6 characters long"
         });
     }
 
     try {
-
         const user = await userModel.findById(req.user.id);
 
         if (!user) {
@@ -172,61 +272,34 @@ const changePassword = async (req, res) => {
             });
         }
 
-        const isPasswordValid = await bcrypt.compare(
-            currentPassword,
-            user.password
-        );
+        const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
 
-        if (!isPasswordValid) {
+        if (!isCurrentPasswordValid) {
             return res.status(401).json({
                 message: "Current password is incorrect"
             });
         }
 
-        const hashedPassword = await bcrypt.hash(newPassword, 10);
-
-        user.password = hashedPassword;
-
+        const hashedNewPassword = await bcrypt.hash(newPassword, 12);
+        user.password = hashedNewPassword;
         await user.save();
-
-        // 📧 Send confirmation email
-        const htmlTemplate=
-        await sendEmail(
-            user.email,
-            "Password Changed - NextHireAI",
-            user.name,
- `
-<div style="font-family:Arial;max-width:600px;margin:auto;border:1px solid #000;padding:20px">
-
-<h2 style="color:black;">NextHireAI</h2>
-
-<p>Hello <b>${user.name}</b>,</p>
-
-<p>Your password has been <b>successfully updated</b>.</p>
-
-<p>If you made this change, no further action is required.</p>
-
-<p>If you did <b>not</b> change your password, please reset your password immediately.</p>
-
-<br>
-
-<p><b>NextHireAI Security Team</b></p>
-
-</div>
-`
-        );
 
         return res.status(200).json({
             message: "Password changed successfully"
         });
 
     } catch (error) {
-
-        console.log(error);
-
+        console.error('Change password error:', error);
         return res.status(500).json({
             message: "Server error"
         });
     }
 };
-module.exports = { register, login ,getMe , changePassword};
+
+module.exports = {
+    register,
+    login,
+    getMe,
+    refreshToken,
+    changePassword
+};

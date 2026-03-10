@@ -142,7 +142,7 @@ export default function Home() {
         </div>
         <h1 className="text-hero" style={{ 
           marginBottom: '1.5rem',
-          background: 'linear-gradient(135deg, #5c4b4b 0%, #e0e7ff 25%, #c7d2fe 50%, #a5b4fc 75%, #818cf8 100%)',
+background:"gray",
           WebkitBackgroundClip: 'text',
           WebkitTextFillColor: 'transparent',
           backgroundClip: 'text',

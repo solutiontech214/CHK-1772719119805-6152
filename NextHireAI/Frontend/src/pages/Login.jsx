@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import axios from 'axios';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 import gsap from 'gsap';
 
 export default function Login() {
@@ -9,6 +9,8 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+  const { login } = useAuth();
   const formRef = useRef(null);
 
   useEffect(() => {
@@ -25,13 +27,18 @@ export default function Login() {
     setLoading(true);
 
     try {
-      const res = await axios.post('http://localhost:3000/api/auth/login', { email, password });
-      if (res.data.token) {
-        localStorage.setItem('token', res.data.token);
-        navigate('/dashboard');
+      const result = await login(email, password);
+      if (result.success) {
+        // Redirect to intended page or dashboard
+        const from = location.state?.from?.pathname || '/dashboard';
+        navigate(from, { replace: true });
+      } else {
+        setError(result.message);
+        gsap.fromTo(formRef.current, { x: -10 }, { x: 10, duration: 0.1, yoyo: true, repeat: 3, ease: 'sine.inOut' });
+        gsap.to(formRef.current, { x: 0, delay: 0.3 });
       }
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to login');
+      setError('An unexpected error occurred');
       gsap.fromTo(formRef.current, { x: -10 }, { x: 10, duration: 0.1, yoyo: true, repeat: 3, ease: 'sine.inOut' });
       gsap.to(formRef.current, { x: 0, delay: 0.3 });
     } finally {

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import axios from 'axios';
+import { useAuth } from '../context/AuthContext';
 import gsap from 'gsap';
 
 export default function Register() {
@@ -10,6 +10,7 @@ export default function Register() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { register } = useAuth();
   const formRef = useRef(null);
 
   useEffect(() => {
@@ -26,13 +27,16 @@ export default function Register() {
     setLoading(true);
 
     try {
-      const res = await axios.post('http://localhost:3000/api/auth/register', { name, email, password });
-      if (res.data.token) {
-        localStorage.setItem('token', res.data.token);
+      const result = await register(name, email, password);
+      if (result.success) {
         navigate('/dashboard');
+      } else {
+        setError(result.message);
+        gsap.fromTo(formRef.current, { x: -10 }, { x: 10, duration: 0.1, yoyo: true, repeat: 3, ease: 'sine.inOut' });
+        gsap.to(formRef.current, { x: 0, delay: 0.3 });
       }
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to register');
+      setError('An unexpected error occurred');
       gsap.fromTo(formRef.current, { x: -10 }, { x: 10, duration: 0.1, yoyo: true, repeat: 3, ease: 'sine.inOut' });
       gsap.to(formRef.current, { x: 0, delay: 0.3 });
     } finally {
